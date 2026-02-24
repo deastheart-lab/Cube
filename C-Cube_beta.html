@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>6D Chess Cube Visualization</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js for 3D Rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            touch-action: none;
+        }
+        #render-canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0;
+        }
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; 
+        }
+        .game-title {
+            letter-spacing: 0.2em;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+        }
+        #status-panel {
+            box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.7);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .turn-white { 
+            border-color: #38bdf8 !important; 
+            background: rgba(30, 41, 59, 0.9) !important;
+            box-shadow: 0 0 25px rgba(56, 189, 248, 0.4) !important;
+        }
+        .turn-black { 
+            border-color: #64748b !important; 
+            background: rgba(15, 23, 42, 0.95) !important;
+            box-shadow: 0 0 25px rgba(0, 0, 0, 0.6) !important;
+        }
+        
+        @keyframes heavy-impact-long {
+            0% { transform: scale(1) translate(0, 0); }
+            2% { transform: scale(1.1) translate(-20px, 15px) rotate(-3deg); }
+            5% { transform: scale(1.15) translate(20px, -15px) rotate(3deg); }
+            10% { transform: scale(1.1) translate(-15px, 10px) rotate(-2deg); }
+            15% { transform: scale(1.08) translate(10px, -5px) rotate(2deg); }
+            20% { transform: scale(1.05) translate(-8px, 4px) rotate(-1.5deg); }
+            30% { transform: scale(1.03) translate(6px, -3px) rotate(1deg); }
+            40% { transform: scale(1.01) translate(-4px, 2px) rotate(-0.8deg); }
+            50% { transform: scale(1) translate(2px, -1px) rotate(0.4deg); }
+            60%, 100% { transform: translate(0, 0) rotate(-2deg); }
+        }
+
+        .domination-impact {
+            animation: heavy-impact-long 3s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes hand-float {
+            0%, 100% { transform: translateY(0) rotate(0); }
+            50% { transform: translateY(-15px) rotate(2deg); }
+        }
+        .puppeteer-hand {
+            position: absolute;
+            width: 120px;
+            height: 120px;
+            z-index: 110;
+            filter: drop-shadow(0 0 15px rgba(16, 185, 129, 0.4));
+            animation: hand-float 4s ease-in-out infinite;
+            display: none;
+        }
+        .string-path {
+            stroke: rgba(16, 185, 129, 0.6);
+            stroke-width: 1.5;
+            fill: none;
+            stroke-dasharray: 4 2;
+        }
+
+        .modal-cracks {
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            pointer-events: none;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" opacity="0.4"><path d="M250 250 L0 0 M250 250 L500 100 M250 250 L400 500 M250 250 L100 450 M250 250 L0 300 M100 0 L200 150 M500 400 L300 350" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/></svg>');
+            background-size: cover;
+            display: none;
+            border-radius: 2.5rem;
+            mix-blend-mode: overlay;
+        }
+
+        .in-check {
+            border-color: #ef4444 !important;
+            box-shadow: 0 0 35px rgba(239, 68, 68, 0.6) !important;
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+        
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+        @keyframes pulse-glow {
+            0% { opacity: 0.8; }
+            50% { opacity: 1; }
+            100% { opacity: 0.8; }
+        }
+        .active-turn-text {
+            animation: pulse-glow 2s infinite ease-in-out;
+        }
+        #error-msg {
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .fade-out {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            visibility: hidden;
+        }
+        #menu-toggle-btn {
+            transition: all 0.3s ease;
+            pointer-events: auto;
+        }
+        #menu-toggle-btn:hover {
+            transform: scale(1.05);
+            background: rgba(30, 41, 59, 1);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(56, 189, 248, 0.5);
+            border-radius: 10px;
+        }
+        .paused-indicator {
+            background: rgba(234, 179, 8, 0.1);
+            border: 1px solid rgba(234, 179, 8, 0.3);
+            color: #eab308;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="render-canvas"></canvas>
+
+    <div id="ui-container">
+        <!-- Unified Game Over Modal -->
+        <div id="game-over-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-xl pointer-events-auto">
+            
+            <div id="puppeteer-overlay" class="absolute inset-0 pointer-events-none hidden">
+                <div class="puppeteer-hand" style="top: 10%; left: 15%; animation-delay: -1s;">
+                    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M20 50 Q15 40 25 35 Q30 30 40 40 Q45 20 55 25 Q60 30 55 45 Q75 35 80 45 Q85 55 70 60 Q70 85 50 90 Q30 85 30 65 L20 50" fill="rgba(16, 185, 129, 0.3)" stroke="#10b981" stroke-width="2"/>
+                    </svg>
+                </div>
+                <div class="puppeteer-hand" style="top: 8%; right: 12%; animation-delay: -2.5s;">
+                    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="transform: scaleX(-1);">
+                        <path d="M20 50 Q15 40 25 35 Q30 30 40 40 Q45 20 55 25 Q60 30 55 45 Q75 35 80 45 Q85 55 70 60 Q70 85 50 90 Q30 85 30 65 L20 50" fill="rgba(16, 185, 129, 0.3)" stroke="#10b981" stroke-width="2"/>
+                    </svg>
+                </div>
+                <svg class="absolute inset-0 w-full h-full">
+                    <path id="string-l" class="string-path" d="M18% 20% L35% 45%" />
+                    <path id="string-r" class="string-path" d="M82% 18% L65% 45%" />
+                </svg>
+            </div>
+
+            <div id="modal-container" class="relative bg-slate-900 border-2 border-sky-500/50 p-10 rounded-[2.5rem] shadow-2xl text-center max-w-md w-full mx-4 transition-all transform scale-95 duration-500 opacity-0 overflow-hidden">
+                <div id="modal-cracks-overlay" class="modal-cracks"></div>
+                
+                <div class="relative z-10">
+                    <div id="winner-icon" class="text-7xl mb-6">🏆</div>
+                    <h2 id="winner-text" class="text-white text-4xl font-black mb-2 uppercase tracking-tighter">WHITE WINS!</h2>
+                    <div id="win-tag" class="inline-block px-4 py-1 rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-black tracking-widest uppercase mb-6">DOMINATION</div>
+                    <p id="victory-reason" class="text-slate-400 text-sm mb-10 leading-relaxed">The board has been cleared. All opposing forces have been neutralized through absolute tactical superiority.</p>
+                    <button onclick="startNewGame()" id="restart-btn" class="w-full bg-white text-slate-950 hover:bg-sky-400 hover:text-white font-black py-5 rounded-2xl transition-all shadow-xl active:scale-95 uppercase tracking-widest text-xs">
+                        Initiate New Simulation
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <button id="menu-toggle-btn" onclick="toggleMenu()" class="absolute top-6 left-6 bg-slate-800/80 border border-white/10 text-white px-5 py-2 rounded-xl font-bold text-xs tracking-widest uppercase shadow-xl backdrop-blur-md">
+            Menu
+        </button>
+
+        <div class="game-title text-white text-4xl sm:text-5xl font-black pt-8 text-center uppercase">
+            6D Chess Cube
+        </div>
+
+        <div id="error-msg" class="absolute bottom-10 left-1/2 -translate-x-1/2 bg-red-500/90 text-white px-6 py-2 rounded-full font-bold text-sm shadow-xl">
+            ESCAPE CHECK: MOVE KING OR DIMENSION HOP
+        </div>
+
+        <div id="status-panel" class="absolute top-6 right-6 p-6 md:p-8 rounded-2xl w-48 sm:w-64 text-white pointer-events-auto turn-white">
+            <div id="turn-label" class="text-[10px] font-black tracking-[0.3em] text-gray-400 mb-1 uppercase">Current Turn</div>
+            <div id="turn-display" class="text-xl sm:text-2xl font-black mb-1 tracking-tighter active-turn-text text-sky-400">WHITE'S MOVE</div>
+            <div id="check-warning" class="hidden text-red-500 font-black text-[10px] tracking-widest uppercase mb-4 animate-pulse">⚠️ KING IN CHECK</div>
+            <div id="pause-tag" class="hidden inline-block px-2 py-0.5 rounded-md text-[8px] font-black tracking-widest uppercase mb-2 paused-indicator animate-pulse">⏸ Simulation Paused</div>
+            
+            <div class="mb-4">
+                <div class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Selected Board</div>
+                <div id="dimension-display" class="text-sm font-bold text-sky-200 uppercase">NONE</div>
+            </div>
+
+            <div class="h-[2px] w-full bg-white/10 mb-4"></div>
+            
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">White</div>
+                    <div id="white-timer" class="text-xl sm:text-2xl font-mono font-light text-sky-400">08:00</div>
+                    <div id="white-captures" class="text-[10px] text-sky-300">Captures: 0</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Black</div>
+                    <div id="black-timer" class="text-xl sm:text-2xl font-mono font-light text-slate-500">08:00</div>
+                    <div id="black-captures" class="text-[10px] text-slate-400">Captures: 0</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="left-menu" class="absolute top-1/2 left-6 transform -translate-y-1/2 flex items-start space-x-4 transition-all duration-500 opacity-100">
+            <div class="bg-slate-900/80 rounded-2xl p-6 shadow-2xl backdrop-blur-md border border-white/5 w-72 text-white pointer-events-auto">
+                <div class="flex items-center space-x-3 mb-6">
+                    <div class="w-8 h-8 bg-sky-500 rounded-lg flex items-center justify-center shadow-lg shadow-sky-500/20">
+                        <svg viewBox="0 0 24 24" fill="white" class="w-5 h-5"><path d="M12 2L12 6M12 6L16 9M12 6L8 9M12 12a4 4 0 100-8 4 4 0 000 8zM9 22h6v-2H9v2z"/></svg>
+                    </div>
+                    <span class="font-black tracking-widest text-sm uppercase">Control Center</span>
+                </div>
+                
+                <button id="new-game-btn" onclick="startNewGame()" class="group w-full text-left py-3 px-4 mb-3 rounded-xl hover:bg-sky-500 transition-all duration-300 flex justify-between items-center bg-white/5 border border-white/10">
+                    <span class="font-bold">NEW GAME</span>
+                    <span class="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+                </button>
+
+                <button id="previews-toggle-btn" onclick="togglePreviews()" class="group w-full text-left py-3 px-4 mb-3 rounded-xl hover:bg-slate-700 transition-all duration-300 flex justify-between items-center bg-white/5 border border-white/10">
+                    <span class="font-bold text-sky-400">VISUAL TESTING</span>
+                    <span id="previews-arrow" class="transition-transform duration-300">↓</span>
+                </button>
+
+                <div id="previews-content" class="hidden mb-4 grid grid-cols-1 gap-2">
+                    <button onclick="triggerGameOver(true, 'Domination')" class="text-[10px] font-black bg-red-950/30 border border-red-500/30 p-2 rounded-lg hover:bg-red-500/20 text-red-400 transition-colors uppercase text-left">
+                        Preview Domination
+                    </button>
+                    <button onclick="triggerGameOver(false, 'Coercion')" class="text-[10px] font-black bg-emerald-950/30 border border-emerald-500/30 p-2 rounded-lg hover:bg-emerald-500/20 text-emerald-400 transition-colors uppercase text-left">
+                        Preview Coercion
+                    </button>
+                    <button onclick="triggerGameOver(true, 'Checkmate')" class="text-[10px] font-black bg-sky-950/30 border border-sky-500/30 p-2 rounded-lg hover:bg-sky-500/20 text-sky-400 transition-colors uppercase text-left">
+                        Preview Checkmate
+                    </button>
+                </div>
+
+                <button id="rules-toggle-btn" onclick="toggleRules()" class="group w-full text-left py-3 px-4 mb-3 rounded-xl hover:bg-slate-700 transition-all duration-300 flex justify-between items-center bg-white/5 border border-white/10">
+                    <span class="font-bold">RULES</span>
+                    <span id="rules-arrow" class="transition-transform duration-300">↓</span>
+                </button>
+
+                <div id="rules-content" class="hidden text-[11px] text-gray-400 space-y-3 leading-relaxed overflow-y-auto max-h-64 pr-2 custom-scrollbar">
+                    <div class="space-y-1">
+                        <p class="text-white font-black tracking-widest uppercase text-[10px] mb-1">Dimensional Jumping</p>
+                        <p class="text-white">• To Jump: Select a piece, rotate the cube to another board, and click an identical tile coordinate.</p>
+                        <p class="text-white">• Validation: A jump is only legal if the target tile on the new dimension is empty or occupied by an enemy.</p>
+                        <p class="text-white">• Movement Cost: A jump consumes the piece's entire turn. You cannot move and jump simultaneously.</p>
+                    </div>
+                    
+                    <div class="h-[1px] bg-white/10 my-2"></div>
+
+                    <div class="space-y-1">
+                        <p class="text-red-500 font-black tracking-tight uppercase">Domination Victory</p>
+                        <p class="text-gray-400">Neutralize 26 enemy pieces to win via Domination through aggressive piece taking and brute force.</p>
+                    </div>
+
+                    <div class="space-y-1">
+                        <p class="text-emerald-500 font-black tracking-tight uppercase">Coercion Victory</p>
+                        <p class="text-gray-400">Capture 17 or more enemy pieces while also putting the King in direct Check. This creates a state of total behavioral control, ending the simulation.</p>
+                    </div>
+
+                    <div class="space-y-1">
+                        <p class="text-sky-400 font-bold tracking-tight uppercase">Standard Checkmate</p>
+                        <p class="text-gray-400">The King is trapped. Ending a turn while in a checked state results in an immediate breach and tactical defeat.</p>
+                    </div>
+
+                    <div class="h-[1px] bg-white/10 my-2"></div>
+
+                    <p class="text-sky-400 font-bold">• 8-Minute Clock: Match timer is shared across all 6 dimensions.</p>
+                    <p class="text-sky-400 font-bold">• King Restriction: The King cannot Dimensional Hop. He is anchored to his home board.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        const canvas = document.getElementById('render-canvas');
+        let scene, camera, renderer;
+        
+        const BOARD_SIZE = 8;
+        const TILE_SIZE = 1;
+        const PIECE_SCALE = 0.5; 
+        const PIECE_HEIGHT_OFFSET = 0.2;
+        const CUBE_SIDE = BOARD_SIZE * TILE_SIZE; 
+        const CUBE_RADIUS = (CUBE_SIDE / 2) + 0.1; 
+        
+        const STARTING_TIME = 8 * 60; 
+        let whiteTime = STARTING_TIME;
+        let blackTime = STARTING_TIME;
+        let whiteCaptures = 0;
+        let blackCaptures = 0;
+        let isGameRunning = false;
+        let isMenuOpen = false; 
+        let timerInterval = null;
+        let isWhiteTurn = true; 
+        let isKingInCheck = false;
+
+        // UI Selectors
+        const whiteTimerDisplay = document.getElementById('white-timer');
+        const blackTimerDisplay = document.getElementById('black-timer');
+        const whiteCapturesDisplay = document.getElementById('white-captures');
+        const blackCapturesDisplay = document.getElementById('black-captures');
+        const turnDisplay = document.getElementById('turn-display');
+        const statusPanel = document.getElementById('status-panel');
+        const checkWarning = document.getElementById('check-warning');
+        const pauseTag = document.getElementById('pause-tag');
+        const dimensionDisplay = document.getElementById('dimension-display');
+        const errorMsg = document.getElementById('error-msg');
+        const leftMenu = document.getElementById('left-menu');
+        const menuToggleBtn = document.getElementById('menu-toggle-btn');
+        const rulesContent = document.getElementById('rules-content');
+        const rulesArrow = document.getElementById('rules-arrow');
+        const previewsContent = document.getElementById('previews-content');
+        const previewsArrow = document.getElementById('previews-arrow');
+        const gameOverModal = document.getElementById('game-over-modal');
+        const modalContainer = document.getElementById('modal-container');
+        const winnerText = document.getElementById('winner-text');
+        const winnerIcon = document.getElementById('winner-icon');
+        const winTag = document.getElementById('win-tag');
+        const victoryReason = document.getElementById('victory-reason');
+        const modalCracksOverlay = document.getElementById('modal-cracks-overlay');
+        const restartBtn = document.getElementById('restart-btn');
+        const puppeteerOverlay = document.getElementById('puppeteer-overlay');
+        
+        let cubeGroup; 
+        const boardGroups = []; 
+        const dimensionNames = ["TOP (0)", "BOTTOM (1)", "FRONT (2)", "BACK (3)", "RIGHT (4)", "LEFT (5)"];
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let selectedPiece = null;
+        let hoveredBoard = null;
+        const SELECTED_SCALE = 1.3; 
+        
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let currentRotation = { x: 0.5, y: -0.8 }; 
+        const ROTATION_SENSITIVITY = 0.007; 
+
+        const COLOR_BOARD_DARK = 0x1e293b; 
+        const COLOR_BOARD_LIGHT = 0x334155;
+        const COLOR_PIECE_WHITE = 0xf8fafc;
+        const COLOR_PIECE_BLACK = 0x020617;
+        const COLOR_AMBIENT = 0x475569;
+        const COLOR_VALID_MOVE = 0x0ea5e9; 
+
+        function init() {
+            scene = new THREE.Scene();
+            cubeGroup = new THREE.Group();
+            scene.add(cubeGroup);
+            
+            const aspect = window.innerWidth / window.innerHeight;
+            const size = 11; 
+            camera = new THREE.OrthographicCamera(size * aspect / -2, size * aspect / 2, size / 2, size / -2, 1, 100);
+
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0); 
+
+            const ambientLight = new THREE.AmbientLight(COLOR_AMBIENT, 2.5); 
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 2.0); 
+            directionalLight.position.set(20, 30, 15);
+            scene.add(directionalLight);
+
+            camera.position.set(10, 15, 10);
+            camera.lookAt(new THREE.Vector3(0, 0, 0)); 
+            
+            createBoardsAndPieces();
+            cubeGroup.rotation.set(currentRotation.x, currentRotation.y, 0);
+
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('mousedown', onMouseDown, false);
+            window.addEventListener('mousemove', onMouseMove, false);
+            window.addEventListener('mouseup', onMouseUp, false);
+            window.addEventListener('click', onMouseClick, false);
+        }
+        
+        function createBoardsAndPieces() {
+            boardGroups.forEach(group => {
+                group.traverse(child => { if (child.isMesh) { child.geometry.dispose(); child.material.dispose(); } });
+                cubeGroup.remove(group);
+            });
+            boardGroups.length = 0;
+
+            const faceTransforms = [
+                { pos: new THREE.Vector3(0, CUBE_RADIUS, 0), rot: new THREE.Euler(0, 0, 0) },
+                { pos: new THREE.Vector3(0, -CUBE_RADIUS, 0), rot: new THREE.Euler(Math.PI, 0, 0) },
+                { pos: new THREE.Vector3(0, 0, CUBE_RADIUS), rot: new THREE.Euler(-Math.PI / 2, 0, Math.PI) },
+                { pos: new THREE.Vector3(0, 0, -CUBE_RADIUS), rot: new THREE.Euler(Math.PI / 2, 0, Math.PI) },
+                { pos: new THREE.Vector3(CUBE_RADIUS, 0, 0), rot: new THREE.Euler(0, Math.PI, Math.PI / 2) },
+                { pos: new THREE.Vector3(-CUBE_RADIUS, 0, 0), rot: new THREE.Euler(0, Math.PI, -Math.PI / 2) },
+            ];
+
+            for (let depth = 0; depth < 6; depth++) {
+                const transform = faceTransforms[depth];
+                const boardGroup = new THREE.Group();
+                boardGroup.position.copy(transform.pos);
+                boardGroup.rotation.copy(transform.rot);
+                boardGroup.userData.isBoardGroup = true;
+                boardGroup.userData.depthIndex = depth; 
+                createBoard(boardGroup); 
+                addChessSetup(boardGroup); 
+                cubeGroup.add(boardGroup);
+                boardGroups.push(boardGroup); 
+            }
+        }
+
+        function triggerGameOver(winnerIsWhite, condition) {
+            isGameRunning = false;
+            isMenuOpen = false; 
+            if (timerInterval) clearInterval(timerInterval);
+            
+            modalContainer.classList.remove('domination-impact');
+            modalCracksOverlay.style.display = 'none';
+            puppeteerOverlay.classList.add('hidden');
+            puppeteerOverlay.querySelectorAll('.puppeteer-hand').forEach(h => h.style.display = 'none');
+            
+            winnerText.className = "text-white text-4xl font-black mb-2 uppercase tracking-tighter";
+            restartBtn.className = "w-full bg-white text-slate-950 hover:bg-sky-400 hover:text-white font-black py-5 rounded-2xl transition-all shadow-xl active:scale-95 uppercase tracking-widest text-xs";
+
+            winnerText.textContent = winnerIsWhite ? "WHITE VICTORIOUS" : "BLACK VICTORIOUS";
+            winTag.textContent = condition;
+
+            modalContainer.className = "relative bg-slate-900 border-2 p-10 rounded-[2.5rem] shadow-2xl text-center max-w-md w-full mx-4 transition-all transform duration-500 opacity-0 scale-95 overflow-hidden";
+            winTag.className = "inline-block px-4 py-1 rounded-full text-[10px] font-black tracking-widest uppercase mb-6 ";
+
+            switch(condition) {
+                case 'Domination':
+                    winnerIcon.textContent = "☄️";
+                    victoryReason.textContent = "TOTAL ERASURE. 26 pieces neutralized. Too many forces have been lost.";
+                    modalContainer.classList.add('border-red-600', 'domination-impact');
+                    winTag.classList.add('bg-red-600/20', 'text-red-500');
+                    winnerText.classList.add('text-red-600');
+                    modalCracksOverlay.style.display = 'block';
+                    restartBtn.classList.replace('bg-white', 'bg-red-600');
+                    restartBtn.classList.replace('text-slate-950', 'text-white');
+                    break;
+                case 'Coercion':
+                    winnerIcon.textContent = "🎭";
+                    victoryReason.textContent = "Every move was calculated. Every piece sacrificed was part of the design. You have reached peak tactical coercion.";
+                    modalContainer.classList.add('border-emerald-500');
+                    winTag.classList.add('bg-emerald-500/20', 'text-emerald-400');
+                    winnerText.classList.add('text-emerald-400');
+                    puppeteerOverlay.classList.remove('hidden');
+                    puppeteerOverlay.querySelectorAll('.puppeteer-hand').forEach(h => h.style.display = 'block');
+                    restartBtn.classList.replace('bg-white', 'bg-emerald-600');
+                    restartBtn.classList.replace('text-slate-950', 'text-white');
+                    break;
+                case 'Checkmate':
+                    winnerIcon.textContent = "⚔️";
+                    victoryReason.textContent = "A perfect maneuver. The enemy King is trapped across multiple dimensions and has no legal moves remaining.";
+                    modalContainer.classList.add('border-red-500/50');
+                    winTag.classList.add('bg-red-500/20', 'text-red-400');
+                    break;
+                default:
+                    winnerIcon.textContent = "🏆";
+                    victoryReason.textContent = "The simulation has concluded. Tactical objectives achieved.";
+                    modalContainer.classList.add('border-slate-500/50');
+                    winTag.classList.add('bg-slate-500/20', 'text-slate-400');
+            }
+
+            gameOverModal.classList.remove('hidden');
+            setTimeout(() => {
+                modalContainer.classList.remove('opacity-0', 'scale-95');
+                modalContainer.classList.add('opacity-100', 'scale-100');
+            }, 10);
+            
+            leftMenu.classList.add('fade-out');
+        }
+
+        function startNewGame() {
+            modalContainer.classList.add('opacity-0', 'scale-95');
+            setTimeout(() => {
+                gameOverModal.classList.add('hidden');
+                modalCracksOverlay.style.display = 'none';
+                puppeteerOverlay.classList.add('hidden');
+            }, 500);
+            
+            leftMenu.classList.add('fade-out');
+            isMenuOpen = false;
+            
+            if (menuToggleBtn) menuToggleBtn.classList.remove('hidden');
+            if (timerInterval) clearInterval(timerInterval);
+            
+            whiteTime = STARTING_TIME;
+            blackTime = STARTING_TIME;
+            whiteCaptures = 0;
+            blackCaptures = 0;
+            whiteTimerDisplay.textContent = formatTime(whiteTime);
+            blackTimerDisplay.textContent = formatTime(blackTime);
+            
+            isGameRunning = true;
+            isWhiteTurn = true; 
+            isKingInCheck = false;
+            updateTurnUI();
+            
+            timerInterval = setInterval(() => { 
+                if (isGameRunning && !isMenuOpen) { 
+                    if (isWhiteTurn) {
+                        whiteTime = Math.max(0, whiteTime - 1);
+                        whiteTimerDisplay.textContent = formatTime(whiteTime);
+                        if (whiteTime === 0) triggerGameOver(false, "Timeout");
+                    } else {
+                        blackTime = Math.max(0, blackTime - 1);
+                        blackTimerDisplay.textContent = formatTime(blackTime);
+                        if (blackTime === 0) triggerGameOver(true, "Timeout");
+                    }
+                } 
+            }, 1000); 
+            createBoardsAndPieces();
+        }
+
+        function updateTurnUI() {
+            statusPanel.classList.remove('in-check');
+            checkWarning.classList.add('hidden');
+            isKingInCheck = checkForCheck(isWhiteTurn);
+            
+            whiteCapturesDisplay.textContent = `Captures: ${whiteCaptures}`;
+            blackCapturesDisplay.textContent = `Captures: ${blackCaptures}`;
+
+            if (isWhiteTurn) {
+                turnDisplay.textContent = "WHITE'S MOVE";
+                turnDisplay.className = "text-xl sm:text-2xl font-black mb-1 tracking-tighter active-turn-text text-sky-400";
+                statusPanel.classList.remove('turn-black');
+                statusPanel.classList.add('turn-white');
+                whiteTimerDisplay.className = "text-xl sm:text-2xl font-mono font-light text-sky-400";
+                blackTimerDisplay.className = "text-xl sm:text-2xl font-mono font-light text-slate-500";
+            } else {
+                turnDisplay.textContent = "BLACK'S MOVE";
+                turnDisplay.className = "text-xl sm:text-2xl font-black mb-1 tracking-tighter active-turn-text text-slate-400";
+                statusPanel.classList.remove('turn-white');
+                statusPanel.classList.add('turn-black');
+                whiteTimerDisplay.className = "text-xl sm:text-2xl font-mono font-light text-slate-500";
+                blackTimerDisplay.className = "text-xl sm:text-2xl font-mono font-light text-white";
+            }
+
+            if (isKingInCheck) {
+                statusPanel.classList.add('in-check');
+                checkWarning.classList.remove('hidden');
+            }
+
+            if (isMenuOpen && isGameRunning) {
+                pauseTag.classList.remove('hidden');
+            } else {
+                pauseTag.classList.add('hidden');
+            }
+        }
+
+        function toggleMenu() {
+            if (leftMenu.classList.contains('fade-out')) {
+                leftMenu.classList.remove('fade-out');
+                isMenuOpen = true;
+            } else {
+                leftMenu.classList.add('fade-out');
+                isMenuOpen = false;
+            }
+            updateTurnUI();
+        }
+
+        function togglePreviews() {
+            if (previewsContent.classList.contains('hidden')) {
+                previewsContent.classList.remove('hidden');
+                previewsArrow.style.transform = 'rotate(180deg)';
+                rulesContent.classList.add('hidden');
+                rulesArrow.style.transform = 'rotate(0deg)';
+            } else {
+                previewsContent.classList.add('hidden');
+                previewsArrow.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        function toggleRules() {
+            if (rulesContent.classList.contains('hidden')) {
+                rulesContent.classList.remove('hidden');
+                rulesArrow.style.transform = 'rotate(180deg)';
+                previewsContent.classList.add('hidden');
+                previewsArrow.style.transform = 'rotate(0deg)';
+            } else {
+                rulesContent.classList.add('hidden');
+                rulesArrow.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        function checkForCheck(forWhite) {
+            let kingPos = null, kingBoard = null;
+            for (let board of boardGroups) {
+                const king = board.children.find(c => c.userData.isPiece && c.userData.type === 'King' && c.userData.isWhite === forWhite);
+                if (king) { kingPos = king.position; kingBoard = board; break; }
+            }
+            if (!kingPos) return false;
+            for (let board of boardGroups) {
+                const opponentPieces = board.children.filter(c => c.userData.isPiece && c.userData.isWhite !== forWhite);
+                for (let piece of opponentPieces) {
+                    if (isValidMove(piece, kingBoard, kingPos.x, kingPos.z, true)) return true;
+                }
+            }
+            return false;
+        }
+
+        function attemptMove(targetBoard, tx, tz) {
+            if (!selectedPiece || isMenuOpen) return; 
+            if (!isValidMove(selectedPiece, targetBoard, tx, tz)) {
+                showError("INVALID MOVE");
+                deselect();
+                return;
+            }
+
+            let victim = targetBoard.children.find(c => c.userData.isPiece && Math.abs(c.position.x - tx) < 0.1 && Math.abs(c.position.z - tz) < 0.1);
+            let capturedKing = victim && victim.userData.type === 'King';
+            
+            if (victim) {
+                if (isWhiteTurn) whiteCaptures++;
+                else blackCaptures++;
+                targetBoard.remove(victim);
+            }
+
+            selectedPiece.parent.remove(selectedPiece);
+            targetBoard.add(selectedPiece);
+            selectedPiece.position.set(tx, PIECE_HEIGHT_OFFSET, tz);
+
+            const currentCaptures = isWhiteTurn ? whiteCaptures : blackCaptures;
+            const opponentInCheck = checkForCheck(!isWhiteTurn);
+
+            if (currentCaptures >= 26) {
+                triggerGameOver(isWhiteTurn, "Domination");
+                return;
+            }
+
+            if (currentCaptures >= 17 && opponentInCheck) {
+                triggerGameOver(isWhiteTurn, "Coercion");
+                return;
+            }
+
+            if (capturedKing) {
+                triggerGameOver(isWhiteTurn, "Checkmate");
+                return;
+            }
+
+            if (checkForCheck(isWhiteTurn)) {
+                triggerGameOver(!isWhiteTurn, "Checkmate");
+                return;
+            }
+
+            isWhiteTurn = !isWhiteTurn;
+            updateTurnUI();
+            deselect();
+        }
+
+        function formatTime(s) { return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
+
+        function onWindowResize() {
+            const aspect = window.innerWidth / window.innerHeight;
+            const size = 11;
+            camera.left = size * aspect / -2; camera.right = size * aspect / 2;
+            camera.top = size / 2; camera.bottom = size / -2;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseDown(e) { isDragging = true; previousMousePosition = { x: e.clientX, y: e.clientY }; }
+        function onMouseUp() { isDragging = false; }
+
+        function onMouseMove(e) {
+            if (isDragging) {
+                const deltaX = e.clientX - previousMousePosition.x;
+                const deltaY = e.clientY - previousMousePosition.y;
+                currentRotation.y += deltaX * ROTATION_SENSITIVITY;
+                currentRotation.x += deltaY * ROTATION_SENSITIVITY;
+                currentRotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, currentRotation.x));
+                cubeGroup.rotation.y = currentRotation.y;
+                cubeGroup.rotation.x = currentRotation.x;
+            }
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cubeGroup.children, true);
+            let target = null;
+            if (intersects.length > 0) {
+                let obj = intersects[0].object;
+                while (obj && !obj.userData.isBoardGroup && obj.parent) obj = obj.parent;
+                if (obj && obj.userData.isBoardGroup) target = obj;
+            }
+            if (target !== hoveredBoard) {
+                const old = hoveredBoard;
+                hoveredBoard = target;
+                if (old) updateBoardVisuals(old);
+                if (hoveredBoard) {
+                    updateBoardVisuals(hoveredBoard);
+                    dimensionDisplay.textContent = dimensionNames[hoveredBoard.userData.depthIndex];
+                } else {
+                    dimensionDisplay.textContent = "NONE";
+                }
+            }
+        }
+
+        function updateBoardVisuals(board) {
+            if (!board) return;
+            board.children.forEach(child => {
+                if (child.userData.isTile) {
+                    const gx = Math.round(child.position.x / TILE_SIZE + BOARD_SIZE / 2 - 0.5);
+                    const gy = Math.round(child.position.z / TILE_SIZE + BOARD_SIZE / 2 - 0.5);
+                    const isDark = (gx + gy) % 2 === 0;
+                    const isValidMoveTile = selectedPiece && isValidMove(selectedPiece, board, child.position.x, child.position.z);
+                    if (isValidMoveTile) {
+                        child.material.color.setHex(COLOR_VALID_MOVE);
+                        child.material.emissive.setHex(0x024566);
+                    } else if (board === hoveredBoard) {
+                        child.material.color.setHex(isDark ? 0x243045 : 0x3d4b60);
+                        child.material.emissive.setHex(0x050810); 
+                    } else {
+                        child.material.color.setHex(isDark ? COLOR_BOARD_DARK : COLOR_BOARD_LIGHT);
+                        child.material.emissive.setHex(0x000000);
+                    }
+                }
+            });
+        }
+
+        function onMouseClick(event) {
+            if (!isGameRunning || isDragging || isMenuOpen) return; 
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cubeGroup.children, true);
+            if (intersects.length > 0) {
+                let entity = intersects[0].object;
+                while (entity && !entity.userData.isPiece && !entity.userData.isTile && entity.parent) entity = entity.parent;
+                if (entity && entity.userData.isPiece) {
+                    if (entity.userData.isWhite === isWhiteTurn) selectPiece(entity);
+                    else if (selectedPiece) attemptMove(entity.parent, entity.position.x, entity.position.z);
+                } else if (entity && entity.userData.isTile) {
+                    attemptMove(entity.parent, entity.position.x, entity.position.z);
+                } else deselect();
+            } else deselect();
+        }
+
+        function selectPiece(entity) {
+            if (selectedPiece === entity) { deselect(); return; }
+            deselect();
+            selectedPiece = entity;
+            selectedPiece.scale.multiplyScalar(SELECTED_SCALE);
+            boardGroups.forEach(b => updateBoardVisuals(b));
+        }
+
+        function deselect() {
+            if (selectedPiece) {
+                selectedPiece.scale.set(PIECE_SCALE, PIECE_SCALE, PIECE_SCALE);
+                selectedPiece = null;
+                boardGroups.forEach(b => updateBoardVisuals(b));
+            }
+        }
+
+        function showError(msg) {
+            errorMsg.textContent = msg;
+            errorMsg.style.opacity = '1';
+            setTimeout(() => errorMsg.style.opacity = '0', 1500);
+        }
+
+        function isValidMove(piece, targetBoard, tx, tz, ignoreCheckEnforcement = false) {
+            const startBoard = piece.parent;
+            const startX = Math.round(piece.position.x / TILE_SIZE + BOARD_SIZE / 2 - 0.5);
+            const startZ = Math.round(piece.position.z / TILE_SIZE + BOARD_SIZE / 2 - 0.5); 
+            const endX = Math.round(tx / TILE_SIZE + BOARD_SIZE / 2 - 0.5);
+            const endZ = Math.round(tz / TILE_SIZE + BOARD_SIZE / 2 - 0.5);
+            const dx = endX - startX, dz = endZ - startZ;
+            const isBoardChange = startBoard !== targetBoard;
+            const type = piece.userData.type;
+            if (isBoardChange && type === 'King') return false;
+            const targetPiece = targetBoard.children.find(c => c.userData.isPiece && Math.round(c.position.x / TILE_SIZE + BOARD_SIZE/2 - 0.5) === endX && Math.round(c.position.z / TILE_SIZE + BOARD_SIZE/2 - 0.5) === endZ);
+            if (targetPiece && targetPiece.userData.isWhite === piece.userData.isWhite) return false;
+            if (isBoardChange && dx === 0 && dz === 0) return true;
+            if (isBoardChange) return false;
+            const isPathClear = (sx, sz) => {
+                let cx = startX + sx, cz = startZ + sz;
+                while (cx !== endX || cz !== endZ) {
+                    if (startBoard.children.find(c => c.userData.isPiece && Math.round(c.position.x/TILE_SIZE + BOARD_SIZE/2 - 0.5) === cx && Math.round(c.position.z/TILE_SIZE + BOARD_SIZE/2 - 0.5) === cz)) return false;
+                    cx += sx; cz += sz;
+                }
+                return true;
+            };
+            const absDx = Math.abs(dx), absDz = Math.abs(dz);
+            switch (type) {
+                case 'Pawn':
+                    const dir = piece.userData.isWhite ? -1 : 1;
+                    if (dx === 0 && !targetPiece) {
+                        if (dz === dir) return true;
+                        if (dz === 2 * dir && (piece.userData.isWhite ? startZ === 6 : startZ === 1) && isPathClear(0, dir)) return true;
+                    }
+                    return (absDx === 1 && dz === dir && targetPiece);
+                case 'Rook': return (dx === 0 || dz === 0) && isPathClear(Math.sign(dx), Math.sign(dz));
+                case 'Knight': return (absDx === 2 && absDz === 1) || (absDx === 1 && absDz === 2);
+                case 'Bishop': return absDx === absDz && isPathClear(Math.sign(dx), Math.sign(dz));
+                case 'Queen': return (dx === 0 || dz === 0 || absDx === absDz) && isPathClear(dx === 0 ? 0 : Math.sign(dx), dz === 0 ? 0 : Math.sign(dz));
+                case 'King': return absDx <= 1 && absDz <= 1;
+                default: return false;
+            }
+        }
+
+        function createPiece(type, isWhite) {
+            const mat = new THREE.MeshPhongMaterial({ color: isWhite ? COLOR_PIECE_WHITE : COLOR_PIECE_BLACK, shininess: 100, specular: 0x444444 });
+            const group = new THREE.Group(); 
+            group.userData = { isPiece: true, type, isWhite };
+            const addMesh = (geo, y = 0, rot = [0,0,0]) => {
+                const m = new THREE.Mesh(geo, mat); m.position.y = y; m.rotation.set(...rot); group.add(m);
+            };
+            addMesh(new THREE.CylinderGeometry(0.35, 0.45, 0.15, 24), 0.07);
+            addMesh(new THREE.CylinderGeometry(0.3, 0.4, 0.1, 24), 0.18);
+            switch (type) {
+                case 'Pawn': addMesh(new THREE.CylinderGeometry(0.15, 0.25, 0.6, 16), 0.5); addMesh(new THREE.SphereGeometry(0.22, 16, 16), 0.9); break;
+                case 'Rook': addMesh(new THREE.CylinderGeometry(0.25, 0.3, 0.9, 16), 0.6); addMesh(new THREE.CylinderGeometry(0.32, 0.28, 0.3, 8), 1.1); break;
+                case 'Knight': addMesh(new THREE.CylinderGeometry(0.2, 0.3, 0.6, 16), 0.45); addMesh(new THREE.BoxGeometry(0.25, 0.5, 0.5), 0.9, [0.3, 0, 0]); addMesh(new THREE.BoxGeometry(0.15, 0.3, 0.2), 1.1, [0.1, 0, 0]); break;
+                case 'Bishop': addMesh(new THREE.CylinderGeometry(0.18, 0.28, 1.0, 16), 0.6); addMesh(new THREE.SphereGeometry(0.25, 12, 12), 1.1); addMesh(new THREE.SphereGeometry(0.08, 8, 8), 1.4); break;
+                case 'Queen': addMesh(new THREE.CylinderGeometry(0.18, 0.3, 1.2, 16), 0.7); addMesh(new THREE.CylinderGeometry(0.35, 0.1, 0.4, 16), 1.3); addMesh(new THREE.SphereGeometry(0.1, 8, 8), 1.55); break;
+                case 'King': addMesh(new THREE.CylinderGeometry(0.2, 0.35, 1.3, 16), 0.75); addMesh(new THREE.BoxGeometry(0.15, 0.5, 0.15), 1.5); addMesh(new THREE.BoxGeometry(0.4, 0.15, 0.15), 1.5); break;
+            }
+            group.scale.set(PIECE_SCALE, PIECE_SCALE, PIECE_SCALE);
+            return group;
+        }
+
+        function createBoard(parent) {
+            const base = new THREE.Mesh(new THREE.BoxGeometry(BOARD_SIZE, 0.1, BOARD_SIZE), new THREE.MeshPhongMaterial({ color: COLOR_BOARD_DARK }));
+            base.position.y = -0.1; parent.add(base);
+            const tileGeo = new THREE.BoxGeometry(TILE_SIZE, 0.15, TILE_SIZE); 
+            for (let x = 0; x < BOARD_SIZE; x++) {
+                for (let y = 0; y < BOARD_SIZE; y++) {
+                    const tile = new THREE.Mesh(tileGeo, new THREE.MeshPhongMaterial({ color: (x+y)%2===0 ? COLOR_BOARD_DARK : COLOR_BOARD_LIGHT }));
+                    tile.userData.isTile = true;
+                    tile.position.set(x - BOARD_SIZE/2 + 0.5, 0, y - BOARD_SIZE/2 + 0.5);
+                    parent.add(tile);
+                }
+            }
+        }
+
+        function addChessSetup(parent) {
+            const row = ['Rook', 'Knight', 'Bishop', 'Queen', 'King', 'Bishop', 'Knight', 'Rook'];
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                const p1 = createPiece('Pawn', false); p1.position.set(i-3.5, 0.2, 1-3.5); parent.add(p1);
+                const p2 = createPiece(row[i], false); p2.position.set(i-3.5, 0.2, 0-3.5); parent.add(p2);
+                const p3 = createPiece('Pawn', true); p3.position.set(i-3.5, 0.2, 6-3.5); parent.add(p3);
+                const p4 = createPiece(row[i], true); p4.position.set(i-3.5, 0.2, 7-3.5); parent.add(p4);
+            }
+        }
+
+        function animate() { requestAnimationFrame(animate); renderer.render(scene, camera); }
+        init(); animate();
+        leftMenu.classList.add('fade-out');
+    </script>
+</body>
+</html>
